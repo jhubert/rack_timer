@@ -1,6 +1,8 @@
 module ActionDispatch
   class MiddlewareStack
 
+    RackTimerEnabled = ENV.has_key?('RACK_TIMER_ENABLED')
+
     # this class will wrap around each Rack-based middleware and take timing snapshots of how long
     # each middleware takes to execute
     class RackTimer
@@ -21,7 +23,7 @@ module ActionDispatch
 
       def incoming_timestamp(env)
         if env.has_key?("MIDDLEWARE_TIMESTAMP") # skip over the first middleware
-          elapsed_time = (Time.now.to_f - env["MIDDLEWARE_TIMESTAMP"][1].to_f) * 1000 
+          elapsed_time = (Time.now.to_f - env["MIDDLEWARE_TIMESTAMP"][1].to_f) * 1000
           if elapsed_time > LogThreshold # only log if took greater than LogThreshold
             Rails.logger.info "Rack Timer (incoming) -- #{env["MIDDLEWARE_TIMESTAMP"][0]}: #{elapsed_time} ms"
           end
@@ -44,7 +46,7 @@ module ActionDispatch
             if env["MIDDLEWARE_TIMESTAMP"][0] and env["MIDDLEWARE_TIMESTAMP"][0] == @app.class.to_s
               # this is the actual elapsed time of the final piece of Middleware (typically routing) AND the actual
               # application's action
-              Rails.logger.info "Rack Timer (Application Action) -- #{@app.class.to_s}: #{elapsed_time} ms"              
+              Rails.logger.info "Rack Timer (Application Action) -- #{@app.class.to_s}: #{elapsed_time} ms"
             else
               Rails.logger.info "Rack Timer (outgoing) -- #{@app.class.to_s}: #{elapsed_time} ms"
             end
@@ -60,16 +62,17 @@ module ActionDispatch
 
       # overrding the built-in Middleware.build and adding a RackTimer wrapper class
       def build(app)
-        RackTimer.new(klass.new(app, *args, &block))
-      end    
+        handler = klass.new(app, *args, &block)
+        RackTimerEnabled ? RackTimer.new(handler) : handler
+      end
 
     end
 
     # overriding this in order to wrap the incoming app in a RackTimer, which gives us timing on the final
     # piece of Middleware, which for Rails is the routing plus the actual Application action
     def build(app = Proc.new)
-      middlewares.freeze.reverse.inject(RackTimer.new(app)) { |a, e| e.build(a) }
+      app = RackTimer.new(app) if RackTimerEnabled
+      middlewares.freeze.reverse.inject(app) { |a, e| e.build(a) }
     end
-
   end
 end
